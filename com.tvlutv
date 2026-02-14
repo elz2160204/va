@@ -1,0 +1,77 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+import hashlib
+import json
+import time
+import requests
+from typing import Any
+from Crypto.Cipher import AES
+
+API_URL = "https://api.yekmhjb.cc/api.php"
+CLIENT = "pwa"
+
+# From app constants (PP pool):
+# - encryption_key
+# - encryption_iv
+# - sign_key
+AES_KEY = b"f95277cfbbimgkcusimcuekd3b777pwa"  # 32 bytes
+AES_IV = b"f95277cfbbimgkcu"  # 16 bytes
+SIGN_KEY = "8DH2lusir4W6uhqFjbCkudNDosdfghjH"
+
+
+def canonical_json(payload: Any) -> str:
+    if isinstance(payload, str):
+        return payload
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+
+def encrypt_data(plain_text: str) -> str:
+    cipher = AES.new(AES_KEY, AES.MODE_CFB, iv=AES_IV, segment_size=128)
+    return cipher.encrypt(plain_text.encode("utf-8")).hex()
+
+
+def decrypt_data(data_hex: str) -> str:
+    cipher = AES.new(AES_KEY, AES.MODE_CFB, iv=AES_IV, segment_size=128)
+    return cipher.decrypt(bytes.fromhex(data_hex)).decode("utf-8", errors="replace")
+
+
+def build_sign(data_hex: str, timestamp: str | int) -> str:
+    ts = str(timestamp)
+    raw = f"client={CLIENT}&data={data_hex}&timestamp={ts}{SIGN_KEY}"
+    first = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    return hashlib.md5(first.encode("utf-8")).hexdigest()
+
+
+def build_form(payload: Any, timestamp: str | int | None = None) -> tuple[dict[str, str], str]:
+    ts = str(int(time.time()) if timestamp is None else int(timestamp))
+    plain = canonical_json(payload)
+    data_hex = encrypt_data(plain)
+    sign = build_sign(data_hex, ts)
+    form = {"client": CLIENT, "timestamp": ts, "data": data_hex, "sign": sign}
+    return form, plain
+
+
+def main() -> None:
+    payload_obj =  {"oauth_id":hashlib.md5(str(time.time()).encode()).hexdigest(),
+                    "bundleId":"com.tvlutv","version":"2.4.1","oauth_type":"android_rn","app_type":"rn","img_type":"new","client":"pwa","user_agent":"",
+                    "device_brand":"a","device_model":"b","device":"Android","trace_id":"xxxx","mod":"down","code":"homePage"}
+    print(payload_obj)
+
+    form, plain = build_form(payload_obj, int(time.time()))
+
+    print("plaintext:", plain)
+
+    print("url:", API_URL)
+    print("form:", json.dumps(form, ensure_ascii=False))
+
+    headers = {
+        "user-agent": "Dart/3.0 (dart:io)",
+        "content-type": "application/x-www-form-urlencoded;charset=utf-8",
+        "accept-encoding": "gzip",
+    }
+    resp = requests.post(API_URL, data=form, headers=headers, timeout=20)
+    print("status:", resp.status_code)
+    print(resp.json())
+    data = decrypt_data(resp.json()["data"])
+    print(data)
+
